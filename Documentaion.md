@@ -54,6 +54,17 @@ Observed output:
 The verified evidence is the localhost port mapping. A separate test from another computer was not performed. This setup implements local-only administrative access, rather than a firewall allowlist for selected remote client IP addresses. If assessment requires access from selected remote computers, additional source-IP filtering and allowed/denied client tests are still needed. Internal Kubernetes node and Pod networking is separate from the host port binding.
 
 
+### Windows configuration
+
+- `netsh interface portproxy` forwards TCP connections from
+  `192.168.1.109:6443` to the current localhost API port.
+- `DevOpsLab-API-Allow` permits source `192.168.1.108`.
+- `DevOpsLab-API-BlockOthers` blocks the IPv4 ranges
+  `0.0.0.0-192.168.1.107` and `192.168.1.109-255.255.255.255`.
+- Both firewall rules apply to inbound TCP port `6443` at local address
+  `192.168.1.109`, across all Windows Firewall profiles.
+
+
 ## Credentials and required access rights
 
 Minikube configures the client credentials in kubeconfig for the
