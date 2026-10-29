@@ -1,0 +1,35 @@
+1) Create/start the cluster: one control plane + one worker
+minikube start -p devops-lab --driver=docker --nodes=2 --kubernetes-version=v1.35.8 --cpus=2 --memory=3072 --listen-address=127.0.0.1
+
+
+2) Verify the cluster
+minikube status -p devops-lab
+kubectl --context devops-lab get nodes -o wide
+kubectl --context devops-lab get pods -n kube-system
+docker port devops-lab 8443/tcp
+
+
+3) Install the NGINX Ingress Controller
+kubectl --context devops-lab apply -f .\ingress-nginx.yaml
+
+kubectl --context devops-lab -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=300s
+
+
+4) Deploy Juice Shop
+kubectl --context devops-lab apply -f .\juice-shop-deplyment.yml
+
+kubectl --context devops-lab -n default rollout status deployment/juice-shop --timeout=600s
+
+kubectl --context devops-lab -n default get pods -l app=juice-shop -o wide
+
+
+5) Create the internal Service
+kubectl --context devops-lab apply -f .\juice-shop-service.yml
+
+
+6) Create the Ingress routing rule
+kubectl --context devops-lab apply -f .\juice-shop-ingress.yml
+
+
+7) Open access from Windows — keep this terminal running
+minikube service ingress-nginx-controller -n ingress-nginx --url -p devops-lab

@@ -1,0 +1,14 @@
+
+Recommended stack: kube-prometheus-stack, including:
+- Prometheus and Prometheus Operator for collecting metrics.
+- Grafana for dashboards.
+- Alertmanager for alert routing.
+- kube-state-metrics for Kubernetes workload state.
+- node-exporter for node resource metrics.
+
+Enable ingress-nginx metrics to monitor request rate, HTTP errors,
+and response latency.
+
+Monitor Pod readiness, restarts, CPU/memory usage, node health,
+and available replicas. Alert on unavailable replicas, sustained
+HTTP errors, and high response latency.

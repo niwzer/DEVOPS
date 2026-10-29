@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: juice-shop
+  namespace: default
+
+spec:
+  replicas: 4
+
+  selector:
+    matchLabels:
+      app: juice-shop
+
+  template:
+    metadata:
+      labels:
+        app: juice-shop
+
+    spec:
+      automountServiceAccountToken: false
+
+      containers:
+        - name: juice-shop
+          image: bkimminich/juice-shop:v20.3.0
+
+          ports:
+            - name: http
+              containerPort: 3000
+
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            
