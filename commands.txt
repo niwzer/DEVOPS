@@ -8,6 +8,127 @@ kubectl --context devops-lab get nodes -o wide
 kubectl --context devops-lab get pods -n kube-system
 docker port devops-lab 8443/tcp
 
+3) Configure the LAN API entry point 
+
+Cluster host: 192.168.1.109
+Allowed client: 192.168.1.108
+LAN API port: TCP 6443
+
+& {
+    $ErrorActionPreference = 'Stop'
+
+    $serverIp = '192.168.1.109'
+    $clientIp = '192.168.1.108'
+    $listenPort = 6443
+
+    # If the client IP changes, update BOTH ranges as well.
+    $blockedRanges = @(
+        '0.0.0.0-192.168.1.107'
+        '192.168.1.109-255.255.255.255'
+    )
+
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'Open Windows PowerShell using Run as administrator.'
+    }
+
+    $profiles = Get-NetFirewallProfile -PolicyStore ActiveStore
+    $invalidProfiles = @($profiles | Where-Object {
+        [string]$_.Enabled -ne 'True' -or [string]$_.AllowLocalFirewallRules -eq 'False'
+    })
+    if ($invalidProfiles.Count -gt 0) {
+        throw 'Firewall must be enabled and local rules must be permitted.'
+    }
+
+    $mapping = (docker port devops-lab 8443/tcp | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $mapping -notmatch '^127\.0\.0\.1:(\d+)$') {
+        throw "Unexpected Minikube API mapping: $mapping"
+    }
+    $apiPort = [int]$Matches[1]
+
+    $scope = @{
+        PolicyStore  = 'PersistentStore'
+        Direction    = 'Inbound'
+        LocalAddress = $serverIp
+        LocalPort    = $listenPort
+        Protocol     = 'TCP'
+        Profile      = 'Any'
+        Enabled      = 'True'
+    }
+
+    # Configure the block rule before the allow rule and LAN listener.
+    $rules = @(
+        @{
+            Name          = 'DevOpsLab-API-BlockOthers'
+            DisplayName   = 'DevOpsLab API block other IPs'
+            Action        = 'Block'
+            RemoteAddress = $blockedRanges
+        }
+        @{
+            Name          = 'DevOpsLab-API-Allow'
+            DisplayName   = "DevOpsLab API allow $clientIp"
+            Action        = 'Allow'
+            RemoteAddress = @($clientIp)
+        }
+    )
+
+    foreach ($rule in $rules) {
+        $existingRule = Get-NetFirewallRule -PolicyStore PersistentStore -Name $rule.Name -ErrorAction SilentlyContinue
+        if ($existingRule) {
+            Set-NetFirewallRule @scope -Name $rule.Name -NewDisplayName $rule.DisplayName -Action $rule.Action -RemoteAddress $rule.RemoteAddress -ErrorAction Stop
+        }
+        else {
+            New-NetFirewallRule @scope -Name $rule.Name -DisplayName $rule.DisplayName -Action $rule.Action -RemoteAddress $rule.RemoteAddress -ErrorAction Stop | Out-Null
+        }
+    }
+
+    $proxyTable = (netsh interface portproxy show v4tov4 | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not read existing port proxy mappings.'
+    }
+
+    $entryPattern = '(?m)^\s*' + [regex]::Escape($serverIp) + '\s+' + $listenPort + '\s+'
+    $proxyAction = if ($proxyTable -match $entryPattern) { 'set' } else { 'add' }
+
+    if ($proxyAction -eq 'add') {
+        $conflicts = @(Get-NetTCPConnection -LocalPort $listenPort -State Listen -ErrorAction SilentlyContinue | Where-Object {
+            $_.LocalAddress -in @($serverIp, '0.0.0.0', '::')
+        })
+        if ($conflicts.Count -gt 0) {
+            throw "Another listener is using TCP port $listenPort. Inspect it before continuing."
+        }
+    }
+
+    Start-Service iphlpsvc -ErrorAction Stop
+
+    netsh interface portproxy $proxyAction v4tov4 "listenaddress=$serverIp" "listenport=$listenPort" connectaddress=127.0.0.1 "connectport=$apiPort" protocol=tcp
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to configure the API port proxy.'
+    }
+}
+
+4) Verify API listener and effective firewall rules 
+
+docker port devops-lab 8443/tcp
+
+netsh interface portproxy show all
+
+Get-NetTCPConnection -LocalAddress 192.168.1.109 -LocalPort 6443 -State Listen |
+    Format-Table LocalAddress, LocalPort, State -AutoSize
+
+Get-NetFirewallRule -PolicyStore ActiveStore -Name 'DevOpsLab-API-*' |
+    Format-Table Name, Enabled, Action -AutoSize
+
+Get-NetFirewallRule -PolicyStore ActiveStore -Name 'DevOpsLab-API-*' |
+    Get-NetFirewallAddressFilter |
+    Format-List LocalAddress, RemoteAddress
+
+Get-NetFirewallRule -PolicyStore ActiveStore -Name 'DevOpsLab-API-*' |
+    Get-NetFirewallPortFilter |
+    Format-Table Protocol, LocalPort -AutoSize
+
+
 
 3) Install the NGINX Ingress Controller
 kubectl --context devops-lab apply -f .\ingress-nginx.yaml
